@@ -66,21 +66,24 @@
 
 #define USER_DEFINE_KEY (QK_KB)
 enum Custom_Keycodes {
-    QMK_KB_MODE_2P4G = USER_DEFINE_KEY,
-    QMK_KB_MODE_BLE1,
-    QMK_KB_MODE_BLE2,
-    QMK_KB_MODE_BLE3,
-    QMK_KB_MODE_USB,
-    QMK_BATT_NUM,
-    QMK_WIN_LOCK,
+    QMK_KB_MODE_2P4G = USER_DEFINE_KEY,  // 0
+    QMK_KB_MODE_BLE1,                     // 1
+    QMK_KB_MODE_BLE2,                     // 2
+    QMK_KB_MODE_BLE3,                     // 3
+    QMK_KB_MODE_USB,                      // 4
+    QMK_BATT_NUM,                         // 5
+    QMK_WIN_LOCK,                         // 6
+    QMK_TEST_COLOUR,                      // 7
+    QMK_MAC_WIN_CH,                       // 8 - Windows/Mac mode switch
+    QMK_SLEEP_CYCLE,                      // 9 - Cycle sleep timer (1/3/10/30 min)
+    QMK_SOCD_TOG,                         // 10 - Toggle SOCD Cleaner
+    QMK_BRIGHTNESS_UNLOCK,                // 11 - Toggle Wireless Brightness Limit
     QMK_KB_SIX_N_CH,
-    QMK_TEST_COLOUR,
     QMK_KB_2P4G_PAIR,
     QMK_KB_BLE1_PAIR,
     QMK_KB_BLE2_PAIR,
     QMK_KB_BLE3_PAIR,
-    QMK_DEBUG_SWITCH, // Debug mode switch position
-    QMK_MAC_WIN_CH,   // Windows/Mac mode switch
+    QMK_DEBUG_SWITCH,
 #if LOGO_LED_ENABLE
     LOGO_TOG,  // Toggle Logo LED on/off
     LOGO_MOD,  // Cycle Logo LED mode forward
@@ -114,6 +117,9 @@ typedef struct {
     uint8_t Nkro;
     uint8_t Mac_Win_Mode;
     uint8_t Win_Lock;
+    uint32_t User_Sleep_Time;  // Sleep timeout in seconds (default 180 = 3 min)
+    uint32_t User_DSleep_Time; // Deep sleep timeout in seconds (0xFFFFFFFE = disabled)
+    uint8_t Wireless_Brightness_Unlock; // 0 = clamped to 200 over wireless, 1 = 255 allowed
 #if LOGO_LED_ENABLE
     uint8_t Logo_On_Off;     // Logo LED on/off state
     uint8_t Logo_Mode;       // Logo LED effect mode
@@ -171,6 +177,12 @@ typedef enum {
 #define MODE_SWITCH_BT 2
 #define MODE_SWITCH_DEBOUNCE_TIME 100 // 100ms debounce
 #define MODE_INDICATOR_TIMEOUT 1000   // Show for 1000ms (1 second)
+
+// User EEPROM layout:
+//   Offset 0–163:   Per-key RGB color_buffer  (RGB_MATRIX_LED_COUNT * 2)
+//   Offset 164–245: Per-key RGB brightness_buffer (RGB_MATRIX_LED_COUNT)
+//   Offset 256+:    Keyboard_Info_t struct
+#define KEYBOARD_INFO_EEPROM_OFFSET 256
 
 // USB Auto-Switch Feature
 // When enabled, keyboard automatically switches to USB mode when USB cable is plugged in

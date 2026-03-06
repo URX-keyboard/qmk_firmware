@@ -18,7 +18,7 @@
 #pragma once
 
 #define USER_BATT_HIGH_POWER        (2555)
-#define USER_BATT_LOW_POWER         (2065)
+#define USER_BATT_LOW_POWER         (1934) // 10%
 #define USER_BATT_STDOWN_POWER      (1865)
 
 #define USER_BATT_POWER_SCAN_COUNT  (10)

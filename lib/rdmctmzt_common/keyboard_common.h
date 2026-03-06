@@ -72,6 +72,7 @@
 #define COLOR_GREEN 0, 255, 0
 #define COLOR_RED 255, 0, 0
 #define COLOR_YELLOW 255, 255, 0
+#define COLOR_CYAN 0, 255, 255
 
 // ============================================================================
 // State Variables (extern declarations)
@@ -79,6 +80,9 @@
 
 // Key state tracking
 extern bool Key_Fn_Status;
+
+// Sleep Indicator
+extern bool Sleep_Debug_Mode;
 
 // Battery display state
 extern bool    User_Key_Batt_Num_Show;
@@ -163,3 +167,8 @@ void kb_keyboard_post_init(void);
 
 // Common process_record handler - returns true if keycode was handled
 bool kb_process_record_common(uint16_t keycode, keyrecord_t *record);
+
+// ============================================================================
+// SOCD
+// ============================================================================
+extern bool socd_cleaner_enabled;

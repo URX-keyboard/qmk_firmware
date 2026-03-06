@@ -18,12 +18,14 @@
 #include "rdmctmzt_common.h"
 
 Keyboard_Info_t Keyboard_Info = {
-    .Key_Mode     = INIT_WORK_MODE,
-    .Ble_Channel  = INIT_BLE_CHANNEL,
-    .Batt_Number  = INIT_BATT_NUMBER,
-    .Nkro         = INIT_ALL_SIX_KEY,
-    .Mac_Win_Mode = INIT_WIN_MAC_MODE,
-    .Win_Lock     = INIT_WIN_LOCK_NLOCK,
+    .Key_Mode         = INIT_WORK_MODE,
+    .Ble_Channel      = INIT_BLE_CHANNEL,
+    .Batt_Number      = INIT_BATT_NUMBER,
+    .Nkro             = INIT_ALL_SIX_KEY,
+    .Mac_Win_Mode     = INIT_WIN_MAC_MODE,
+    .Win_Lock         = INIT_WIN_LOCK_NLOCK,
+    .User_Sleep_Time  = 180,          // 3 minutes (in seconds)
+    .User_DSleep_Time = 0xFFFFFFFE,   // Deep sleep disabled
 #if LOGO_LED_ENABLE
     .Logo_On_Off     = 1,   // Logo LED on by default
     .Logo_Mode       = 1,   // Default mode: wave animation (LOGO_MODE_WAVE)
@@ -220,10 +222,31 @@ OSAL_IRQ_HANDLER(Vector78) {
     }
 
     if (Keyboard_Info.Key_Mode != QMK_USB_MODE) {
-        if (Keyboard_Status.System_Work_Status && (!Keyboard_Status.System_Sleep_Mode)) {
-            Spi_Ack_Send_Commad(USER_KEYBOARD_SLEEP);
-        } else {
-            Spi_Main_Loop();
+        if ((Keyboard_Status.System_Work_Status == 0) || (Keyboard_Status.System_Sleep_Mode != 0)) 
+        {
+            if (Keyboard_Info.Key_Mode == QMK_BLE_MODE) 
+            {
+                Spi_AP_Loop_Count   = Keyboard_Info.Key_Mode;
+                Spi_Main_Loop_Count = Spi_Main_Loop_Count + 1;
+                if (3 < Spi_Main_Loop_Count) 
+                {
+                    Spi_Main_Loop_Count = Keyboard_Info.Key_Mode;
+                    Spi_Main_Loop();
+                }
+            } 
+            else 
+            {
+                Spi_Main_Loop_Count = 0;
+                Spi_Main_Loop();
+                Spi_AP_Loop_Count = Spi_AP_Loop_Count + 1;
+                if (1 < Spi_AP_Loop_Count) {
+                    Spi_AP_Loop_Count = 0;
+                    Spi_AP_Loop_Flag  = true;
+                }
+            }
+        }
+    else {
+        Spi_Ack_Send_Commad(USER_KEYBOARD_SLEEP);
         }
     }
 
@@ -297,6 +320,14 @@ OSAL_IRQ_HANDLER(Vector78) {
             Ble_Name_Synchronization();
         }
 
+        if (User_Sleep_Time_Send) {
+            Sleep_Time_Synchronization();
+        }
+
+        if (User_DSleep_Time_Send) {
+            DSleep_Time_Synchronization();
+        }
+
         Systick_Led_Count++;
         if (Systick_Led_Count >= 255) {
             Systick_Led_Count = 0;
@@ -327,11 +358,11 @@ OSAL_IRQ_HANDLER(Vector78) {
         if (Save_Flash) {
             Save_Flash_3S_Count++;
             if (Save_Flash_3S_Count >= USER_TIME_3S_TIME) {
-                if (Spi_Send_Recv_Flg || (gpio_read_pin(ES_SPI_ACK_IO)) || (!Led_Flash_Busy)) {
+                if (Spi_Send_Recv_Flg || (gpio_read_pin(ES_SPI_ACK_IO))) {
                     Save_Flash_3S_Count = (USER_TIME_3S_TIME - 10);
                 } else {
                     Reset_Save_Flash = true;
-                    eeprom_write_block_user((void *)&Keyboard_Info.Key_Mode, 0, sizeof(Keyboard_Info_t));
+                    eeprom_write_block_user((void *)&Keyboard_Info.Key_Mode, (void*)KEYBOARD_INFO_EEPROM_OFFSET, sizeof(Keyboard_Info_t));
                     Reset_Save_Flash    = false;
                     Save_Flash          = false;
                     Save_Flash_3S_Count = 0;
@@ -452,15 +483,17 @@ OSAL_IRQ_HANDLER(Vector78) {
 }
 
 void Init_Keyboard_Infomation(void) {
-    eeprom_read_block_user((void *)&Keyboard_Info.Key_Mode, 0, sizeof(Keyboard_Info_t));
+    eeprom_read_block_user((void *)&Keyboard_Info.Key_Mode, (void*)KEYBOARD_INFO_EEPROM_OFFSET, sizeof(Keyboard_Info_t));
 
     if ((Keyboard_Info.Key_Mode == 0XFF) && (Keyboard_Info.Ble_Channel == 0XFF) && (Keyboard_Info.Batt_Number == 0XFF) && (Keyboard_Info.Nkro == 0XFF) && (Keyboard_Info.Mac_Win_Mode == 0XFF) && (Keyboard_Info.Win_Lock == 0XFF)) {
-        Keyboard_Info.Key_Mode     = INIT_WORK_MODE;
-        Keyboard_Info.Ble_Channel  = INIT_BLE_CHANNEL;
-        Keyboard_Info.Batt_Number  = INIT_BATT_NUMBER;
-        Keyboard_Info.Nkro         = INIT_ALL_KEY;
-        Keyboard_Info.Mac_Win_Mode = INIT_WIN_MODE;
-        Keyboard_Info.Win_Lock     = INIT_WIN_NLOCK;
+        Keyboard_Info.Key_Mode        = INIT_WORK_MODE;
+        Keyboard_Info.Ble_Channel     = INIT_BLE_CHANNEL;
+        Keyboard_Info.Batt_Number     = INIT_BATT_NUMBER;
+        Keyboard_Info.Nkro            = INIT_ALL_KEY;
+        Keyboard_Info.Mac_Win_Mode    = INIT_WIN_MODE;
+        Keyboard_Info.Win_Lock        = INIT_WIN_NLOCK;
+        Keyboard_Info.User_Sleep_Time  = 180;          // 3 minutes
+        Keyboard_Info.User_DSleep_Time = 0xFFFFFFFE;   // Deep sleep disabled
 #if LOGO_LED_ENABLE
         Keyboard_Info.Logo_On_Off     = 1;
         Keyboard_Info.Logo_Mode       = 1; // Wave animation (LOGO_MODE_WAVE)
@@ -470,12 +503,14 @@ void Init_Keyboard_Infomation(void) {
         Keyboard_Info.Logo_Speed      = 2;
 #endif
     } else if ((Keyboard_Info.Key_Mode == 0) && (Keyboard_Info.Ble_Channel == 0) && (Keyboard_Info.Batt_Number == 0) && (Keyboard_Info.Nkro == 0) && (Keyboard_Info.Mac_Win_Mode == 0) && (Keyboard_Info.Win_Lock == 0)) {
-        Keyboard_Info.Key_Mode     = INIT_WORK_MODE;
-        Keyboard_Info.Ble_Channel  = INIT_BLE_CHANNEL;
-        Keyboard_Info.Batt_Number  = INIT_BATT_NUMBER;
-        Keyboard_Info.Nkro         = INIT_ALL_KEY;
-        Keyboard_Info.Mac_Win_Mode = INIT_WIN_MODE;
-        Keyboard_Info.Win_Lock     = INIT_WIN_NLOCK;
+        Keyboard_Info.Key_Mode        = INIT_WORK_MODE;
+        Keyboard_Info.Ble_Channel     = INIT_BLE_CHANNEL;
+        Keyboard_Info.Batt_Number     = INIT_BATT_NUMBER;
+        Keyboard_Info.Nkro            = INIT_ALL_KEY;
+        Keyboard_Info.Mac_Win_Mode    = INIT_WIN_MODE;
+        Keyboard_Info.Win_Lock        = INIT_WIN_NLOCK;
+        Keyboard_Info.User_Sleep_Time  = 180;          // 3 minutes
+        Keyboard_Info.User_DSleep_Time = 0xFFFFFFFE;   // Deep sleep disabled
 #if LOGO_LED_ENABLE
         Keyboard_Info.Logo_On_Off     = 1;
         Keyboard_Info.Logo_Mode       = 1; // Wave animation (LOGO_MODE_WAVE)
@@ -509,6 +544,10 @@ void Init_Keyboard_Infomation(void) {
             Keyboard_Info.Win_Lock = INIT_WIN_NLOCK;
         }
 
+        if (Keyboard_Info.Wireless_Brightness_Unlock > 1) {
+            Keyboard_Info.Wireless_Brightness_Unlock = 0;
+        }
+
 #if LOGO_LED_ENABLE
         // Validate Logo LED settings
         if (Keyboard_Info.Logo_On_Off > 1) {
@@ -522,6 +561,14 @@ void Init_Keyboard_Infomation(void) {
         }
         // Hue, Saturation, Brightness can be any value 0-255
 #endif
+
+        // Validate sleep time settings
+        if (Keyboard_Info.User_Sleep_Time > 1800) { // Max 30 minutes
+            Keyboard_Info.User_Sleep_Time = 180;     // Default 3 minutes
+        }
+        if (Keyboard_Info.User_DSleep_Time == 0xFFFFFFFF) {
+            Keyboard_Info.User_DSleep_Time = 0xFFFFFFFE; // Disable deep sleep
+        }
     }
 
     // Read current mode switch position and set initial mode accordingly

@@ -15,8 +15,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "rdmctmzt_common.h"
+#include <string.h>
 
 volatile uint8_t Spi_Send_Recv_Flg   = 0U;
+volatile uint8_t Ap_Fail_repeat_Flag = 0U;
+volatile bool    Spi_AP_Loop_Flag    = false;
+volatile uint8_t Spi_AP_Loop_Count   = 0;
+volatile uint8_t Spi_Main_Loop_Count = 0;
+volatile uint8_t Ap_Get_Flag         = 0;
+volatile uint8_t Ap_Read_Func_Tab[32];
+
 uint8_t          g_es_spi_rx_buf[64] = {0};
 uint8_t          g_es_spi_tx_buf[64] = {0};
 uint8_t          Repet_Send_Count    = 0x00;
@@ -28,9 +36,31 @@ uint16_t Spi_Interval         = SPI_DELAY_RF_TIME;
 bool     Ble_Name_Spi_Send    = false;
 uint8_t  Ble_Name_Spi_Count   = QMK_BLE_CHANNEL_1;
 
+// RF module's reported sleep time
+uint32_t Rf_Reported_Sleep_Time = 180;
+
 uint8_t          app_2g4_data[APP_2G4_BUF_CNT][APP_2G4_BUF_SIZE];
 volatile uint8_t app_2g4_data_send = 0;
 volatile uint8_t app_2g4_data_rev  = 0;
+
+// Ring Buffer for VIA
+typedef struct {
+    uint8_t data[PACKET_SIZE];
+    uint8_t len;
+} rgb_packet_t;
+
+rgb_packet_t Rgb_Queue[RGB_QUEUE_SIZE];
+volatile uint8_t q_head = 0;
+volatile uint8_t q_tail = 0; 
+uint16_t Last_RF_Send_Time = 0;
+
+bool Is_Queue_Full(void) {
+    return ((q_head + 1) % RGB_QUEUE_SIZE) == q_tail;
+}
+
+bool Is_Queue_Empty(void) {
+    return q_head == q_tail;
+}
 
 const md_spi_inittypedef SPI2_InitStruct = /**< SPI init structure */
     {
@@ -207,6 +237,14 @@ void Spi_Send_Commad(uint8_t Commad) {
         for (uint8_t len = 0; len < strlen(USER_BLE3_NAME); len++) {
             g_es_spi_tx_buf[6 + len] = USER_BLE3_NAME[len];
         }
+    } else if (Commad == USER_SLEEP_TIME_SYNC || Commad == USER_DSLEEP_TIME_SYNC) {
+        uint32_t time_val = (Commad == USER_SLEEP_TIME_SYNC) ? 
+                            Keyboard_Info.User_Sleep_Time : 
+                            Keyboard_Info.User_DSleep_Time;
+        g_es_spi_tx_buf[3] = (uint8_t)(time_val >> 24);
+        g_es_spi_tx_buf[4] = (uint8_t)(time_val >> 16);
+        g_es_spi_tx_buf[5] = (uint8_t)(time_val >> 8);
+        g_es_spi_tx_buf[6] = (uint8_t)(time_val);
     }
 
     es_spi_send_recv_by_dma(USER_KEYBOARD_LENGTH, g_es_spi_rx_buf, g_es_spi_tx_buf);
@@ -290,6 +328,35 @@ void Get_Spi_Return_Data(uint8_t *Data) {
                     Ble_Name_Spi_Count = QMK_BLE_CHANNEL_1;
                 }
             }
+
+            uint32_t rf_sleep_time = ((uint32_t)Data[0x0B] << 24) | 
+                                     ((uint32_t)Data[0x0C] << 16) | 
+                                     ((uint32_t)Data[0x0D] << 8) | 
+                                     (uint32_t)Data[0x0E];
+
+            Rf_Reported_Sleep_Time = rf_sleep_time;
+
+            // Set Flag if time is not synced
+            if ((Keyboard_Info.User_Sleep_Time != rf_sleep_time) && (User_Sleep_Time_Send == false)) {
+                User_Sleep_Time_Send = true;
+            }
+
+            uint32_t rf_dsleep_time = ((uint32_t)Data[0x0F] << 24) | 
+                                      ((uint32_t)Data[0x10] << 16) | 
+                                      ((uint32_t)Data[0x11] << 8) | 
+                                      (uint32_t)Data[0x12];
+            if ((Keyboard_Info.User_DSleep_Time != rf_dsleep_time) && (User_DSleep_Time_Send == false)) {
+                User_DSleep_Time_Send = true;
+            }
+
+            if (Data[0x13] == USER_USER_AP_ID) 
+            {
+                Ap_Get_Flag = 1;
+            } else 
+            {
+                Ap_Get_Flag = 0;
+            }
+
         } else if (Data[2] == USER_KEYBOARD_SLEEP) {
             if (Keyboard_Status.System_Work_Status && (Data[3] == USER_SLEEP_PASS)) {
                 if (Keyboard_Info.Key_Mode != QMK_USB_MODE) {
@@ -301,6 +368,8 @@ void Get_Spi_Return_Data(uint8_t *Data) {
                 Keyboard_Status.System_Work_Status = 0;
                 Keyboard_Status.System_Sleep_Mode  = 0;
             }
+        } else if (Data[2] == USER_AP_REQUEST) {
+            User_2P4G_Ap_Function(&Data[3], AP_DATA_SIZE);
         }
 
         if (0XBB == Data[10]) {
@@ -308,4 +377,70 @@ void Get_Spi_Return_Data(uint8_t *Data) {
             Emi_Init();
         }
     }
+}
+
+uint8_t Spi_Nack_Send_Commad_2P4G(uint8_t Commad, uint8_t *Data) {
+    if (Init_Spi_Power_Up) {
+        return SPI_BUSY;
+    }
+    
+    if (Keyboard_Status.System_Work_Status) {
+        return 0;
+    }
+
+    if (Spi_Send_Recv_Flg || (gpio_read_pin(ES_SPI_ACK_IO))) {
+        return 0;
+    }
+
+    Spi_Send_Recv_Flg = 1;
+    Send_Key_Type     = SPI_NACK;
+    Spi_Interval      = SPI_DELAY_RF_TIME;
+
+    g_es_spi_tx_buf[0] = USER_KEYBOARD_COMMAND;
+    g_es_spi_tx_buf[1] = USER_KEYBOARD_LENGTH;
+    g_es_spi_tx_buf[2] = Commad;
+    if (Data) {
+        memcpy(&g_es_spi_tx_buf[3], Data, AP_DATA_SIZE);
+    }
+    es_spi_send_recv_by_dma(USER_KEYBOARD_LENGTH, g_es_spi_rx_buf, g_es_spi_tx_buf);
+    
+    return 1;
+}
+
+void User_2P4G_Ap_Function(uint8_t *Data, uint8_t Data_Size) {
+    if (((*Data != USER_USER_AP_ID) && (Keyboard_Status.System_Work_Status == 0)) ) {
+        memcpy((void *)Ap_Read_Func_Tab, Data, (uint32_t)Data_Size);
+        if (Keyboard_Info.Key_Mode == QMK_USB_MODE) {
+            Spi_Ack_Send_Commad(USER_AP_CMD); //
+        } else {
+            raw_hid_receive((void *)Ap_Read_Func_Tab, (uint8_t)Data_Size);
+        }
+
+        // 2. Add to Queue for RF transmission
+        if (!Is_Queue_Full()) {
+            // Copy the RESPONSE (from Ap_Read_Func_Tab)
+            memcpy(Rgb_Queue[q_head].data, (void *)Ap_Read_Func_Tab, Data_Size);
+            Rgb_Queue[q_head].len = Data_Size;
+            
+            q_head = (q_head + 1) % RGB_QUEUE_SIZE;
+        }
+
+    }
+}
+
+void Process_RF_RGB_Queue(void) {
+    if (Is_Queue_Empty()) { return; }
+
+    if (Init_Spi_Power_Up || Keyboard_Status.System_Work_Status) { return; }
+    if (Spi_Send_Recv_Flg || (gpio_read_pin(ES_SPI_ACK_IO))) { return; }
+
+    if (timer_elapsed(Last_RF_Send_Time) < RF_THROTTLE_MS) { return; }
+
+    uint8_t status = Spi_Nack_Send_Commad_2P4G(USER_AP_CMD, Rgb_Queue[q_tail].data);
+
+    if (status == 1) {
+        // Success: Remove packet from queue
+        q_tail = (q_tail + 1) % RGB_QUEUE_SIZE;
+        Last_RF_Send_Time = timer_read();
+    } 
 }

@@ -56,14 +56,28 @@ void Ble_Name_Synchronization(void) {
     }
 }
 
+// Sleep time synchronization
+bool User_Sleep_Time_Send  = false;
+bool User_DSleep_Time_Send = false;
+
+void Sleep_Time_Synchronization(void) {
+    Spi_Send_Commad(USER_SLEEP_TIME_SYNC);
+    User_Sleep_Time_Send = false;
+}
+
+void DSleep_Time_Synchronization(void) {
+    Spi_Send_Commad(USER_DSLEEP_TIME_SYNC);
+    User_DSleep_Time_Send = false;
+}
+
 uint8_t es_keyboard_leds(void) {
-    switch (Keyboard_Info.Key_Mode) {
-        case QMK_2P4G_MODE: break;
-        case QMK_BLE_MODE:  break;
-        case QMK_USB_MODE:  break;
-        default:            break;
+    // In wireless modes, return LED state reported by the RF module
+    // (received via SPI in Get_Spi_Return_Data)
+    if (Keyboard_Info.Key_Mode == QMK_2P4G_MODE || Keyboard_Info.Key_Mode == QMK_BLE_MODE) {
+        return Keyboard_Status.System_Led_Status;
     }
 
+    // In USB mode, query the actual USB HID driver
     if(es_qmk_driver) {
 		return((*es_qmk_driver->keyboard_leds)());
 	}

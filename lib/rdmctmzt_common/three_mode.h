@@ -29,6 +29,12 @@ extern bool Usb_Dis_Connect;
 extern void Mode_Synchronization(void);
 extern void Ble_Name_Synchronization(void);
 
+// Sleep time synchronization
+extern bool User_Sleep_Time_Send;
+extern bool User_DSleep_Time_Send;
+extern void Sleep_Time_Synchronization(void);
+extern void DSleep_Time_Synchronization(void);
+
 extern uint8_t es_keyboard_leds(void);
 extern void es_send_keyboard(report_keyboard_t *report);
 extern void es_send_nkro(report_nkro_t *report);

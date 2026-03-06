@@ -53,12 +53,8 @@ void Emi_Read_Data(uint8_t *User_Data, uint8_t User_Length) {
 }
 
 void Emi_Write_Data(uint8_t *User_Data, uint8_t User_Length) {
-    if (Emi_Test_Start == false) {
-        return;
+    if (Emi_Test_Start && (User_Data[0] != USER_KEYBOARD_COMMAND)) {
+        User_Data[0] = USER_EMI_COMMAND;
+        raw_hid_send(User_Data, 0x20);
     }
-
-    if (User_Data[0] == USER_KEYBOARD_COMMAND) {
-        return;
-    }
-    User_Data[0] = USER_EMI_COMMAND;
 }

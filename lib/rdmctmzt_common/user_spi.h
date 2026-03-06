@@ -44,6 +44,9 @@
 
 #define USER_GET_RF_STATUS	    0X11
 
+#define USER_SLEEP_TIME_SYNC    0X15
+#define USER_DSLEEP_TIME_SYNC   0X16
+
 #define USER_BLE1_WRITE_NAME    0X12
 #define USER_BLE2_WRITE_NAME    0X13
 #define USER_BLE3_WRITE_NAME    0X14
@@ -53,6 +56,16 @@
 
 #define SPI_DELAY_RF_TIME       (60)
 #define SPI_DELAY_USB_TIME      (500 * 3)
+
+#define USER_USER_AP_ID         0xBB
+#define USER_AP_CMD             0x18
+#define USER_AP_REQUEST         0x19
+
+#define AP_DATA_SIZE            32
+
+#define RGB_QUEUE_SIZE          50
+#define PACKET_SIZE             AP_DATA_SIZE    
+#define RF_THROTTLE_MS          30
 
 enum Custom_Spi_Ack_S {
     SPI_NACK,
@@ -70,11 +83,20 @@ extern uint8_t g_es_spi_tx_buf[64];
 extern uint8_t Repet_Send_Count;
 extern uint8_t Send_Key_Type;
 
+extern volatile uint8_t Ap_Fail_repeat_Flag;
+extern volatile bool Spi_AP_Loop_Flag;
+extern volatile uint8_t Spi_Main_Loop_Count;
+extern volatile uint8_t Spi_AP_Loop_Count;
+extern volatile uint8_t Ap_Get_Flag;
+extern volatile uint8_t Ap_Read_Func_Tab[32];
+
 extern bool Init_Spi_Power_Up;
 extern uint8_t Init_Spi_100ms_Delay;
 extern uint16_t Spi_Interval;
 extern bool Ble_Name_Spi_Send;
 extern uint8_t Ble_Name_Spi_Count;
+
+extern uint32_t Rf_Reported_Sleep_Time;
 
 extern uint8_t app_2g4_data[APP_2G4_BUF_CNT][APP_2G4_BUF_SIZE];
 extern volatile uint8_t app_2g4_data_send;
@@ -94,3 +116,7 @@ extern void es_spi_send_recv_by_dma(uint32_t num, uint8_t *rx_buf, uint8_t *tx_b
 extern void Spi_Send_Commad(uint8_t Commad);
 extern uint8_t Spi_Ack_Send_Commad(uint8_t Commad);
 extern void Get_Spi_Return_Data(uint8_t *Data);
+
+extern uint8_t Spi_Nack_Send_Commad_2P4G(uint8_t Commad, uint8_t *Data);
+extern void User_2P4G_Ap_Function(uint8_t *Data, uint8_t Data_Size);
+extern void Process_RF_RGB_Queue(void);

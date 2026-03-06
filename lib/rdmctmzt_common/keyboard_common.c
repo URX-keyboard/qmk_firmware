@@ -44,6 +44,19 @@ static uint8_t  reset_key_led_index = 0;
 static uint16_t reset_blink_timer   = 0;
 bool            reset_hold_phase    = false;
 
+// Sleep Indicator
+bool Sleep_Debug_Mode = false;
+
+// Fn row LED indices (F1-F12)
+static const uint8_t Led_Fn_Row_Tab[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+
+// USB No Power indication
+bool     User_Usb_No_Power_Show  = false;
+uint16_t User_Usb_No_Power_Timer = 0;
+
+// USB Connection Monitor
+bool     User_Usb_Connected_Prev = false;
+
 // ============================================================================
 // Matrix Delay Functions (empty implementations for this platform)
 // ============================================================================
@@ -63,9 +76,6 @@ bool kb_is_usb_mode(void) {
 }
 
 bool kb_get_caps_lock_state(void) {
-    if (kb_is_usb_mode()) {
-        return host_keyboard_led_state().caps_lock && Usb_If_Ok_Led;
-    }
     return local_caps_lock_state;
 }
 
@@ -162,9 +172,9 @@ void kb_led_rf_mode_show(void) {
 }
 
 void kb_led_power_low_show(void) {
-    for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
-        rgb_matrix_set_color(i, 0, 0, 0);
-    }
+    // for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+    //     rgb_matrix_set_color(i, 0, 0, 0);
+    // }
 
     if (Systick_Led_Count < 25) {
         rgb_matrix_set_color(LED_BATT_INDEX, U_PWM, 0x00, 0x00);
@@ -374,7 +384,40 @@ void kb_show_reset_progress(void) {
 // QMK Callback Functions - Common implementations
 // ============================================================================
 
+// Sleep sync debug
+void kb_show_sleep_sync_debug(void) {
+    uint8_t rf_minutes = Rf_Reported_Sleep_Time / 60;
+
+    // Cap at 12 for Fn row
+    if (rf_minutes > 12) rf_minutes = 12;
+
+    // RF time on Fn row (CYAN) - 1 LED per minute
+    for (uint8_t i = 0; i < 12; i++) {
+        if (i < rf_minutes) {
+            kb_set_led_color(Led_Fn_Row_Tab[i], COLOR_CYAN);
+        } else {
+            kb_led_off(Led_Fn_Row_Tab[i]);
+        }
+    }
+}
+
 bool kb_rgb_matrix_indicators_common(uint8_t led_min, uint8_t led_max) {
+
+    // Sleep sync debug visualization
+    if (Sleep_Debug_Mode) {
+        kb_show_sleep_sync_debug();
+    }
+
+    // SOCD Mode Indication - Show S key red only when Fn is pressed
+    if (socd_cleaner_enabled && Key_Fn_Status) {
+        kb_set_led_color(46, COLOR_RED); // S
+    }
+
+    // macOS Mode Indication - Show M key cyan when Fn is pressed and macOS mode is on
+    if (Keyboard_Info.Mac_Win_Mode == INIT_MAC_MODE && Key_Fn_Status) {
+        kb_set_led_color(65, COLOR_CYAN); // M
+    }
+
     // Show EEPROM reset progress (blinking) when EE_CLR is held
     if (Key_Reset_Status) {
         kb_show_reset_progress();
@@ -385,9 +428,15 @@ bool kb_rgb_matrix_indicators_common(uint8_t led_min, uint8_t led_max) {
 #endif
     kb_update_state_indicators();
 
-    // Show current connection mode when Fn key is held
+    // Show current connection mode and Sleep Timer when Fn key is held.
     if (Key_Fn_Status) {
         kb_show_current_connection_mode();
+        if (Keyboard_Info.Key_Mode == QMK_2P4G_MODE || Keyboard_Info.Key_Mode == QMK_BLE_MODE) {
+            Sleep_Debug_Mode = true;
+        }
+    } else {
+        // Reset sleep debug mode when Fn is released
+        Sleep_Debug_Mode = false;
     }
 
     // Show temporary mode/battery indicators when triggered
@@ -412,7 +461,9 @@ bool kb_rgb_matrix_indicators_common(uint8_t led_min, uint8_t led_max) {
         }
     }
 
-    if (User_Power_Low) {
+    if (User_Usb_No_Power_Show) {
+        kb_set_led_color(LED_USB_INDEX, COLOR_RED);
+    } else if (User_Power_Low) {
         kb_led_power_low_show();
     } else if (Test_Led) {
         kb_user_test_colour_show();
@@ -440,22 +491,18 @@ void kb_notify_usb_device_state_change(struct usb_device_state usb_device_state)
 }
 
 bool kb_led_update(led_t led_state) {
-    // Track Caps Lock state locally for all modes
-    local_caps_lock_state = led_state.caps_lock;
-
-    // In wireless modes, we need to sync the LED state with the wireless module
+    // In wireless modes, sync LED state with the RF module.
     if (Keyboard_Info.Key_Mode != QMK_USB_MODE) {
-        // Update the internal LED status for wireless modes
         // Bit 1 (0x02) represents Caps Lock status
         if (led_state.caps_lock) {
-            Keyboard_Status.System_Led_Status |= 0x02; // Set Caps Lock bit
+            Keyboard_Status.System_Led_Status |= 0x02;
         } else {
-            Keyboard_Status.System_Led_Status &= ~0x02; // Clear Caps Lock bit
+            Keyboard_Status.System_Led_Status &= ~0x02;
         }
+        local_caps_lock_state = led_state.caps_lock;
     }
 
-    // Force immediate LED update by triggering a refresh
-    // This ensures our changes take effect immediately
+    // Force immediate LED update
     rgb_matrix_set_flags(LED_FLAG_ALL);
 
     return true;
@@ -466,11 +513,39 @@ void kb_housekeeping_task(void) {
         Show_Mode_Indicator = false;
     }
 
+    if (User_Usb_No_Power_Show && timer_elapsed(User_Usb_No_Power_Timer) > 1000) {
+        User_Usb_No_Power_Show = false;
+    }
+
+    if (Spi_AP_Loop_Flag) {
+        Spi_AP_Loop_Flag = false;
+            if (Ap_Get_Flag) {
+                Spi_Ack_Send_Commad(USER_AP_REQUEST);
+            }
+    }
+
+    Process_RF_RGB_Queue();
+
 #if LOGO_LED_ENABLE
     // Update logo LEDs independently of RGB matrix state
     // This allows logo LEDs to work even when per-key RGB is disabled
     Logo_Led_Update();
 #endif
+
+    // USB Disconnect Fallback monitor
+    bool usb_connected_now = gpio_read_pin(ES_USB_POWER_IO);
+    if (!usb_connected_now && User_Usb_Connected_Prev) {
+        // USB was just disconnected
+        if (Keyboard_Info.Key_Mode == QMK_USB_MODE) {
+            // We were in USB mode, checks if physical switch is wireless
+            uint8_t physical_mode = Read_Mode_Switch_Position();
+            if (physical_mode != MODE_SWITCH_USB) {
+                // Physical switch is wireless, fall back to it
+                Handle_Mode_Switch_Change(physical_mode);
+            }
+        }
+    }
+    User_Usb_Connected_Prev = usb_connected_now;
 
     // Handle EEPROM reset request
     if (Keyboard_Reset) {
@@ -492,7 +567,7 @@ void kb_housekeeping_task(void) {
         Keyboard_Info.Logo_Speed      = 2;
 #endif
         // Save the reset keyboard info to EEPROM
-        eeprom_write_block_user((void *)&Keyboard_Info.Key_Mode, 0, sizeof(Keyboard_Info_t));
+        eeprom_write_block_user((void *)&Keyboard_Info.Key_Mode, (void*)KEYBOARD_INFO_EEPROM_OFFSET, sizeof(Keyboard_Info_t));
 
         // Clear and reinitialize QMK's EEPROM (RGB, keymap, etc.)
         eeconfig_init();
@@ -531,6 +606,8 @@ void kb_board_init(void) {
     Led_Power_Up   = true;
     Emi_Test_Start = false;
     Keyboard_Reset = false;
+
+    socd_cleaner_enabled = false;
 }
 
 void kb_keyboard_post_init(void) {
@@ -538,8 +615,11 @@ void kb_keyboard_post_init(void) {
         keymap_config.nkro = Keyboard_Info.Nkro;
     }
 
+    // Restore OS layer based on saved Mac_Win_Mode
     if (Keyboard_Info.Mac_Win_Mode == INIT_MAC_MODE) {
-        layer_on(1);
+        layer_move(1);  // macOS layer
+    } else {
+        layer_move(0);  // Windows layer
     }
 }
 
@@ -556,9 +636,23 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
         Test_Led = false;
     }
 
+    if (keycode == KC_CAPS_LOCK && record->event.pressed) {
+        local_caps_lock_state = !local_caps_lock_state;
+    }
+
     switch (keycode) {
         case QMK_KB_MODE_2P4G: { // 2.4G
             if (record->event.pressed) {
+                // Check if physical switch is in Wired mode
+                if (gpio_read_pin(ES_USB_POWER_IO) && Read_Mode_Switch_Position() == MODE_SWITCH_USB) {
+                    // Block switching if physical switch is set to USB
+                    // Flash LED red to indicate blocked action
+                    kb_set_led_color(LED_2P4G_INDEX, COLOR_RED);
+                    User_Usb_No_Power_Show = true; // Reuse this flag/timer for generic blocked indication
+                    User_Usb_No_Power_Timer = timer_read();
+                    return false;
+                }
+
                 Key_2p4g_Status = true;
                 Usb_Disconnect();
                 if (Keyboard_Info.Key_Mode != QMK_2P4G_MODE) {
@@ -578,6 +672,14 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
             return true;
         case QMK_KB_MODE_BLE1:
             if (record->event.pressed) {
+                // Check if physical switch is in Wired mode
+                if (gpio_read_pin(ES_USB_POWER_IO) && Read_Mode_Switch_Position() == MODE_SWITCH_USB) {
+                    kb_set_led_color(LED_BLE_1_INDEX, COLOR_RED);
+                    User_Usb_No_Power_Show = true;
+                    User_Usb_No_Power_Timer = timer_read();
+                    return false;
+                }
+
                 Usb_Disconnect();
                 kb_switch_to_ble_channel(QMK_BLE_CHANNEL_1, USER_SWITCH_BLE_1_MODE, &Key_Ble_1_Status);
             } else {
@@ -588,6 +690,14 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
 
         case QMK_KB_MODE_BLE2:
             if (record->event.pressed) {
+                // Check if physical switch is in Wired mode
+                if (gpio_read_pin(ES_USB_POWER_IO) && Read_Mode_Switch_Position() == MODE_SWITCH_USB) {
+                    kb_set_led_color(LED_BLE_2_INDEX, COLOR_RED);
+                    User_Usb_No_Power_Show = true;
+                    User_Usb_No_Power_Timer = timer_read();
+                    return false;
+                }
+
                 Usb_Disconnect();
                 kb_switch_to_ble_channel(QMK_BLE_CHANNEL_2, USER_SWITCH_BLE_2_MODE, &Key_Ble_2_Status);
             } else {
@@ -598,6 +708,14 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
 
         case QMK_KB_MODE_BLE3:
             if (record->event.pressed) {
+                // Check if physical switch is in Wired mode
+                if (gpio_read_pin(ES_USB_POWER_IO) && Read_Mode_Switch_Position() == MODE_SWITCH_USB) {
+                    kb_set_led_color(LED_BLE_3_INDEX, COLOR_RED);
+                    User_Usb_No_Power_Show = true;
+                    User_Usb_No_Power_Timer = timer_read();
+                    return false;
+                }
+
                 Usb_Disconnect();
                 kb_switch_to_ble_channel(QMK_BLE_CHANNEL_3, USER_SWITCH_BLE_3_MODE, &Key_Ble_3_Status);
             } else {
@@ -607,15 +725,22 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
             return true;
         case QMK_KB_MODE_USB: {
             if (record->event.pressed) {
-                if (Keyboard_Info.Key_Mode != QMK_USB_MODE) {
-                    Keyboard_Info.Key_Mode = QMK_USB_MODE;
-                    Spi_Send_Commad(USER_SWITCH_USB_MODE);
-                    es_restart_usb_driver();
-                    Save_Flash_Set();
-                    Led_Rf_Pair_Flg = false;
-                    // Show mode indicator for 1 second
-                    Show_Mode_Indicator  = true;
-                    Mode_Indicator_Timer = timer_read();
+                // Only switch to USB mode if USB power is present
+                if (gpio_read_pin(ES_USB_POWER_IO)) {
+                    if (Keyboard_Info.Key_Mode != QMK_USB_MODE) {
+                        Keyboard_Info.Key_Mode = QMK_USB_MODE;
+                        Spi_Send_Commad(USER_SWITCH_USB_MODE);
+                        es_restart_usb_driver();
+                        Save_Flash_Set();
+                        Led_Rf_Pair_Flg = false;
+                        // Show mode indicator for 1 second
+                        Show_Mode_Indicator  = true;
+                        Mode_Indicator_Timer = timer_read();
+                    }
+                } else {
+                    // Flash LED red to indicate no USB power
+                    User_Usb_No_Power_Show  = true;
+                    User_Usb_No_Power_Timer = timer_read();
                 }
             }
         }
@@ -669,6 +794,36 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
                     Test_Led    = true;
                     Test_Colour = 0;
                 }
+            }
+        }
+            return true;
+        case QMK_SLEEP_CYCLE: {
+            if (!record->event.pressed) {
+                // Cycle: 60 → 180 → 600 → 1800 → 60 ...
+                switch (Keyboard_Info.User_Sleep_Time) {
+                    case 60:   Keyboard_Info.User_Sleep_Time = 180;  break;
+                    case 180:  Keyboard_Info.User_Sleep_Time = 600;  break;
+                    case 600:  Keyboard_Info.User_Sleep_Time = 1800; break;
+                    default:   Keyboard_Info.User_Sleep_Time = 60;   break;
+                }
+                User_Sleep_Time_Send = true;
+                Save_Flash_Set();
+            }
+        }
+            return true;
+        case QMK_SOCD_TOG: {
+            if (!record->event.pressed) {
+                socd_cleaner_enabled = !socd_cleaner_enabled;
+                Led_Point_Count = 3;
+                Systick_Led_Count = 0;
+            }
+        }
+            return true;
+        case QMK_BRIGHTNESS_UNLOCK: {
+            if (!record->event.pressed) {
+                Keyboard_Info.Wireless_Brightness_Unlock = !Keyboard_Info.Wireless_Brightness_Unlock;
+                Save_Flash_Set();
+                rgb_matrix_enable_noeeprom(); // Force visual update
             }
         }
             return true;
@@ -741,7 +896,7 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
             }
         }
             return true;
-        case MO(3): { // FN
+        case MO(3): { // FN (macOS layer)
             if (record->event.pressed) {
                 Key_Fn_Status = true;
             } else {
@@ -771,7 +926,7 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
         }
             return true;
         case QMK_MAC_WIN_CH:
-            if (!record->event.pressed) {
+            if (record->event.pressed) {
                 // Release modifier keys to prevent stuck keys
                 unregister_code(KC_LALT);
                 unregister_code(KC_LGUI);
@@ -779,19 +934,20 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
                 unregister_code(KC_RGUI);
                 unregister_code(KC_APP);
 
+                // Toggle Mac_Win_Mode (0 = Windows/Layer 0, 1 = Mac/Layer 1)
                 if (Keyboard_Info.Mac_Win_Mode == INIT_WIN_MODE) {
                     Keyboard_Info.Mac_Win_Mode = INIT_MAC_MODE;
                     Keyboard_Info.Win_Lock     = INIT_WIN_NLOCK;
                     Mac_Win_Point_Count        = 3;
-                    layer_on(1);
+                    layer_move(1);  // macOS layer
                 } else {
                     Keyboard_Info.Mac_Win_Mode = INIT_WIN_MODE;
                     Mac_Win_Point_Count        = 1;
-                    layer_off(1);
+                    layer_move(0);  // Windows layer
                 }
                 Save_Flash_Set();
             }
-            return true;
+            return false;
 
         default:
             return true;

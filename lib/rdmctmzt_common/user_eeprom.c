@@ -20,11 +20,16 @@
 /* Exported Constants --------------------------------------------------------*/
 /* Define the size of the sectors to be used */
 #define MCU_PAGE_SIZE           (uint32_t)0x200   /* MCU page size = 0.5kB */
-#define PAGE_SIZE               (uint32_t)0x2000  /* Page size = 8kB */
+#define PAGE_SIZE               (uint32_t)0x1000  /* Page size = 4kB */
 #define MCU_PAGE_NUM            PAGE_SIZE / MCU_PAGE_SIZE
+
+
+#define NB_OF_PRIVATE_VAR     (512)
+#define NB_OF_VAR             (EEPROM_SIZE + NB_OF_PRIVATE_VAR)
 
 /* EEPROM start address in Flash */
 #define EEPROM_START_ADDRESS  ((uint32_t)0x1C000)
+#define USER_EEPROM_START_ADDRESS1  (EEPROM_START_ADDRESS - (MCU_PAGE_SIZE))
 
 /* Pages 0 and 1 base and end addresses */
 #define PAGE0_BASE_ADDRESS    ((uint32_t)(EEPROM_START_ADDRESS))
@@ -53,8 +58,6 @@
 #define PAGE_FULL             ((uint8_t)0x80)
 
 /* Variables' number */
-#define NB_OF_VAR             (EEPROM_SIZE)
-#define NB_OF_PRIVATE_VAR     (64)
 
 #define ES_MCU_MEM_REMAP_OFFSET  ((((SYSCFG->REMAP)&SYSCFG_REMAP_REALBASE_MSK) >> SYSCFG_REMAP_REALBASE_POSS) << 12)
 
@@ -71,11 +74,6 @@ static uint32_t ee_page_transfer(uint32_t virt_address, uint32_t data);
 static uint32_t IAPROM_PAGE_ERASE(uint32_t addr)
 {   
     md_fc_ControlTypeDef SErasePara;
-
-    if ((addr & 0x1ff) != 0)
-    {
-        return !SET;
-    }
 
     __disable_irq();
 
@@ -94,27 +92,20 @@ static uint32_t IAPROM_PAGE_ERASE(uint32_t addr)
 }
 
 static uint32_t IAPROM_WORD_PROGRAM(uint32_t addr,uint32_t data)
-{                     
+{
+    uint32_t local_data;                     
     md_fc_ControlTypeDef ProgramPara;
-
-    if ((addr & 0x3) != 0)
-    {
-        return !SET;
-    }
-
-    if ((((uint32_t)(&data)) & 0x3) != 0)
-    {
-        return !SET;
-    }
   
     __disable_irq();
 
+    local_data = data;
+
     md_fc_unlock();
 
-    ProgramPara.BCnt = 4;
-    ProgramPara.pU32Buf = &data;
-    ProgramPara.SAddr = addr;
     ProgramPara.SAddrC = ~(addr);
+    ProgramPara.BCnt = 4;
+    ProgramPara.pU32Buf = &local_data;
+    ProgramPara.SAddr = addr;
 
     md_fc_program(&ProgramPara);
 
@@ -535,10 +526,20 @@ size_t clamp_length_user(intptr_t offset, size_t len) {
 
 void eeprom_driver_erase(void) {
     ee_format();
+    
+    // Also erase the User Data Page
+    md_fc_ControlTypeDef SErasePara;
+    __disable_irq();
+    md_fc_unlock();
+    SErasePara.SAddr = USER_EEPROM_START_ADDRESS1;
+    SErasePara.SAddrC = ~(USER_EEPROM_START_ADDRESS1);
+    md_fc_page_erase(&SErasePara);
+    md_fc_lock();
+    __enable_irq();
+
     memset(g_es_flash_eeprom_table, 0x00, sizeof(g_es_flash_eeprom_table));
 }
 
-#define USER_EEPROM_START_ADDRESS1  (EEPROM_START_ADDRESS - (MCU_PAGE_SIZE))
 volatile uint8_t es_eeprom_init_flag = 0U;
 
 void eeprom_driver_init(void) {
@@ -627,4 +628,6 @@ bool Led_Flash_Busy = false;
 void Save_Flash_Set(void) {
     Save_Flash = true;
     Save_Flash_3S_Count = 0;
+    memcpy(&g_es_flash_eeprom_table[KEYBOARD_INFO_EEPROM_OFFSET],
+           &Keyboard_Info.Key_Mode, sizeof(Keyboard_Info_t));
 }

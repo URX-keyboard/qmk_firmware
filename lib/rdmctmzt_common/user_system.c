@@ -116,9 +116,11 @@ void Init_Gpio_Infomation(void) {
     // USB POWER
     gpio_set_pin_input(ES_USB_POWER_IO);
 
-    // Mode switch pins (from original working implementation)
-    gpio_set_pin_input_high(MODE_2P4G_IO); // 2.4G mode switch
-    gpio_set_pin_input_high(MODE_BLE_IO);  // BLE mode switch
+    // Mode Switch Pins
+    gpio_set_pin_input_high(B2);           
+    gpio_set_pin_input_high(B10);          
+    gpio_set_pin_input_high(MODE_2P4G_IO); // 2.4G mode switch (B12)
+    gpio_set_pin_input_high(MODE_BLE_IO);  // BLE mode switch (B13)
 
     md_gpio_inittypedef gpiox;
 
@@ -284,17 +286,43 @@ void es_chibios_user_idle_loop_hook(void) {
         gpio_set_pin_input_high(User_Pin_Tab_Rol[i]);
     }
 
-    gpio_set_pin_input(ES_USB_POWER_IO);
+    // Configure GPIO pins
+    gpio_set_pin_input_high(MODE_2P4G_IO); // B12 - 2.4G mode switch
+    gpio_set_pin_input_high(MODE_BLE_IO);  // B13 - BLE mode switch
+    gpio_set_pin_input(ES_USB_POWER_IO);   // USB power
+    gpio_set_pin_input_high(B2);           
+    gpio_set_pin_input_high(B10);          
 
-    /*B0 B3 B4 B6 B7 B1*/
-    uint32_t Gpio_Enable   = 0X000000DB;
-    uint32_t Gpio_Status_H = 0X00000000;
-    uint32_t Gpio_Status_L = 0X000000DB;
-
-    if (gpio_read_pin(ES_USB_POWER_IO)) { // USB C5
-        Gpio_Status_L |= 0X20;
+    /*B0 B3 B4 B5 B6 B7 + B2 B10 B12 B13*/
+    uint32_t Gpio_Enable   = 0x000034FD;  // B0,B2,B3,B4,B5,B6,B7,B10,B12,B13
+    uint32_t Gpio_Status_L = 0xFD;        // Default falling edge for row pins
+    uint32_t Gpio_Status_H = (gpio_read_pin(ES_USB_POWER_IO) ? 0 : 1) * 0x20;  // USB check
+    
+    // B2 check
+    if (!gpio_read_pin(B2)) {
+        Gpio_Status_H |= 0x04;
+        Gpio_Status_L = 0xF9; 
+    }
+    
+    // B10 check
+    if (!gpio_read_pin(B10)) {
+        Gpio_Status_H |= 0x400;
     } else {
-        Gpio_Status_H |= 0X20;
+        Gpio_Status_L |= 0x400;
+    }
+    
+    // B12 check
+    if (!gpio_read_pin(MODE_2P4G_IO)) {
+        Gpio_Status_H |= 0x1000;
+    } else {
+        Gpio_Status_L |= 0x1000;
+    }
+    
+    // B13 check
+    if (!gpio_read_pin(MODE_BLE_IO)) {
+        Gpio_Status_H |= 0x2000;
+    } else {
+        Gpio_Status_L |= 0x2000;
     }
     Gpio_Enable |= 0X20;
 
@@ -306,8 +334,9 @@ void es_chibios_user_idle_loop_hook(void) {
     GPIOB->AFL &= 0xFF0FFFFF; // 选择复用功能
     GPIOB->AFL |= 0x00300000; // 选择复用模式 NABLE:1 DISABLE:0
 
-    md_exti_set_interrupt_pin_0_7(EXTI, MD_EXTI_GPIOB0 | MD_EXTI_GPIOB1 | MD_EXTI_GPIOB3 | MD_EXTI_GPIOB4 | MD_EXTI_GPIOC5 | MD_EXTI_GPIOB6 | MD_EXTI_GPIOB7);
-    // md_exti_set_interrupt_pin_8_15(EXTI, MD_EXTI_GPIOB10);
+    // EXTI Config
+    md_exti_set_interrupt_pin_0_7(EXTI, MD_EXTI_GPIOB0 | MD_EXTI_GPIOA1 | MD_EXTI_GPIOB2 | MD_EXTI_GPIOB3 | MD_EXTI_GPIOB4 | MD_EXTI_GPIOC5 | MD_EXTI_GPIOB6 | MD_EXTI_GPIOB7);
+    md_exti_set_interrupt_pin_8_15(EXTI, MD_EXTI_GPIOB10 | MD_EXTI_GPIOB12 | MD_EXTI_GPIOB13);
 
     md_exti_enable_it_gpio_pin(EXTI, Gpio_Enable);            /*0~7 , 10*/
     md_exti_enable_rising_edge_trigger(EXTI, Gpio_Status_H);  /*0~7 , 10*/
@@ -405,7 +434,7 @@ void es_chibios_user_idle_loop_hook(void) {
                 }
 
                 for (uint8_t k = 0; k < MATRIX_COLS; k++) {
-                    gpio_write_pin_high(User_Pin_Tab_Col[j]);
+                    gpio_write_pin_high(User_Pin_Tab_Col[k]);
                 }
 
                 delay = 50;
@@ -477,24 +506,24 @@ void Check_Mode_Switch_Changed(void) {
             // Start debounce timer
             Mode_Switch_Changed          = true;
             Mode_Switch_Debounce_Timer   = timer_read();
-            Last_Mode_Switch_Position    = Current_Mode_Switch_Position;
-            Current_Mode_Switch_Position = current_position;
+            Last_Mode_Switch_Position    = current_position; 
         } else {
             // Check if debounce time has passed
             if (timer_elapsed(Mode_Switch_Debounce_Timer) >= MODE_SWITCH_DEBOUNCE_TIME) {
-                // Confirm the change is stable
-                if (current_position == Current_Mode_Switch_Position) {
+                // Here we check if the current live reading matches what we saw when we started debouncing
+                if (current_position == Last_Mode_Switch_Position) {
+                    Current_Mode_Switch_Position = current_position; // Now we update the official state
                     Handle_Mode_Switch_Change(Current_Mode_Switch_Position);
                     Mode_Switch_Changed = false;
                 } else {
-                    // Reading changed again, restart debounce
-                    Current_Mode_Switch_Position = current_position;
+                    // Reading changed during debounce, restart timer
+                    Last_Mode_Switch_Position    = current_position;
                     Mode_Switch_Debounce_Timer   = timer_read();
                 }
             }
         }
     } else {
-        // Position is stable, reset debounce
+        // Position matches current, reset debounce if it was active
         Mode_Switch_Changed = false;
     }
 }
@@ -524,8 +553,12 @@ void Handle_Mode_Switch_Change(uint8_t new_position) {
             return; // Unknown position, do nothing
     }
 
+    // Force update if the physical switch changed to Wired, or if the mode is different
+    // This ensures that moving the physical switch to Wired always asserts Wired mode
+    bool force_update = (target_mode == QMK_USB_MODE);
+
     // Only switch if different from current mode
-    if ((target_mode != Keyboard_Info.Key_Mode) || (target_mode == QMK_BLE_MODE && target_channel != Keyboard_Info.Ble_Channel)) {
+    if (force_update || (target_mode != Keyboard_Info.Key_Mode) || (target_mode == QMK_BLE_MODE && target_channel != Keyboard_Info.Ble_Channel)) {
         if (target_mode == QMK_USB_MODE) {
             // Switch to USB mode
             Keyboard_Info.Key_Mode = QMK_USB_MODE;
