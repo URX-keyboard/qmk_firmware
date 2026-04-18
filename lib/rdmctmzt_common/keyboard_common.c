@@ -76,6 +76,14 @@ bool kb_is_usb_mode(void) {
 }
 
 bool kb_get_caps_lock_state(void) {
+    if (Keyboard_Info.Key_Mode == QMK_USB_MODE) {
+        return host_keyboard_led_state().caps_lock;
+    }
+
+    if (Keyboard_Info.Key_Mode == QMK_2P4G_MODE || Keyboard_Info.Key_Mode == QMK_BLE_MODE) {
+        return (Keyboard_Status.System_Led_Status & 0x02) != 0;
+    }
+
     return local_caps_lock_state;
 }
 
@@ -636,7 +644,7 @@ bool kb_process_record_common(uint16_t keycode, keyrecord_t *record) {
         Test_Led = false;
     }
 
-    if (keycode == KC_CAPS_LOCK && record->event.pressed) {
+    if (keycode == KC_CAPS_LOCK && record->event.pressed && Keyboard_Info.Key_Mode != QMK_USB_MODE) {
         local_caps_lock_state = !local_caps_lock_state;
     }
 
