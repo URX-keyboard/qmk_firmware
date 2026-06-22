@@ -1,0 +1,6 @@
+*.origin
+*.swp
+*~
+.dep
+build
+.DS_Store

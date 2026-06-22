@@ -1,0 +1,11 @@
+{
+    "module_name": "SOCD Cleaner",
+    "maintainer": "getreuer",
+    "license": "Apache-2.0",
+    "url": "https://getreuer.info/posts/keyboards/socd-cleaner",
+    "keycodes": [
+        {"key": "SOCDON"},
+        {"key": "SOCDOFF"},
+        {"key": "SOCDTOG"}
+    ]
+}
