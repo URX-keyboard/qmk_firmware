@@ -4,20 +4,41 @@ on:
   push:
     branches: [master, develop, xap]
     paths:
-      - "util/env-bootstrap.sh"
-      - ".github/workflows/bootstrap_testing.yml"
+    - 'util/env-bootstrap.sh'
+    - '.github/workflows/bootstrap_testing.yml'
   pull_request:
     paths:
-      - "util/env-bootstrap.sh"
-      - ".github/workflows/bootstrap_testing.yml"
+    - 'util/env-bootstrap.sh'
+    - '.github/workflows/bootstrap_testing.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  prep:
+    runs-on: ubuntu-latest
+
+    outputs:
+      any_changed: ${{ steps.file_changes.outputs.any_changed }}
+
+    steps:
+    - name: Get changed files
+      id: file_changes
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: tj-actions/changed-files@v47
+      with:
+        use_rest_api: true
+        files: |
+          util/env-bootstrap.sh
+          .github/workflows/bootstrap_testing.yml
+
   bootstrap-test-linux:
     name: Bootstrap (Linux)
+
+    needs: prep
+    if: ${{ github.event_name != 'pull_request' || needs.prep.outputs.any_changed == 'true' }}
+
     runs-on: ubuntu-latest
 
     strategy:
@@ -28,14 +49,14 @@ jobs:
           - debian:11
           - debian:12
           - debian:13
-          - ubuntu:20.04
           - ubuntu:22.04
           - ubuntu:24.04
+          - ubuntu:26.04
 
           # RHEL/CentOS/Fedora based
-          - fedora:41
           - fedora:42
           - fedora:43
+          - fedora:44
           - rockylinux:8
           - rockylinux:9
           - rockylinux/rockylinux:10
@@ -43,7 +64,7 @@ jobs:
           - almalinux:9
           - almalinux:10
 
-          # OpenSUSE based (we skip Tumbleweed as it has issues with package versions between pattern installs and other dependencies preinstalled into the base container)
+          # OpenSUSE based (we skip Tumbleweed as it has issues with package mirrors regularly being out of date)
           - opensuse/leap:latest
 
           # Gentoo-based
@@ -75,7 +96,7 @@ jobs:
                   ;;
                 *suse*)
                   zypper --non-interactive refresh
-                  zypper --non-interactive install sudo git shadow findutils  # findutils=xargs
+                  zypper --non-interactive install sudo git shadow findutils tar  # findutils=xargs
                   ;;
                 *gentoo*)
                   emerge-webrsync
@@ -163,6 +184,10 @@ jobs:
 
   bootstrap-test-macos:
     name: Bootstrap (macOS)
+
+    needs: prep
+    if: ${{ github.event_name != 'pull_request' || needs.prep.outputs.any_changed == 'true' }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -207,6 +232,9 @@ jobs:
 
   bootstrap-test-windows:
     name: Bootstrap (Windows)
+
+    needs: prep
+    if: ${{ github.event_name != 'pull_request' || needs.prep.outputs.any_changed == 'true' }}
 
     strategy:
       fail-fast: false
