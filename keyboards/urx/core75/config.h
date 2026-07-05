@@ -17,7 +17,7 @@
 #pragma once
 
 // Firmware version identifier
-#define VIA_FIRMWARE_VERSION 0x01000000  // v1.0.0.0
+#define VIA_FIRMWARE_VERSION 0x01010000  // v1.1.0
 
 /* Mechanical locking support. Use KC_LCAP, KC_LNUM or KC_LSCR instead in keymap */
 #define LOCKING_SUPPORT_ENABLE
@@ -84,4 +84,3 @@
 // Extra features
 #define USB_AUTO_SWITCH_ENABLE 0
 #define BATTERY_LED_COUNT 10
-
