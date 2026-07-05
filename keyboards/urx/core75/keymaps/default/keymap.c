@@ -15,6 +15,7 @@
  */
 #include QMK_KEYBOARD_H
 #include "keyboard_common.h"
+#include "palettefx.h"
 #include "print.h"
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
@@ -148,6 +149,9 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
                 memcpy(data + 5, color_buffer + led_index * 2, led_count * 2);
             } else if (value_id == 2) {
                 memcpy(data + 5, brightness_buffer + led_index, led_count);
+            } else if (value_id == 3) {
+                // Palette Selection
+                data[3] = (rgb_matrix_get_hue() / RGB_MATRIX_HUE_STEP) % palettefx_num_palettes();
             } else if (value_id == 4) {
                 // Return current sleep timer index based on the RF value
                 extern uint32_t Rf_Reported_Sleep_Time;

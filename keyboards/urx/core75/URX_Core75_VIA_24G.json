@@ -28,12 +28,12 @@
 								[ "None", 0 ],
 								[ "Solid Colour", 1 ],
                                 [ "Per Key RGB", 255],
-								[ "PaletteFX: Gradient", 46 ],
-								[ "PaletteFX: Flow", 47 ],
-								[ "PaletteFX: Ripple", 48 ],
-								[ "PaletteFX: Sparkle", 49 ],
-								[ "PaletteFX: Vortex", 50 ],
-								[ "PaletteFX: Reactive", 51 ],
+								[ "PaletteFX: Gradient", 47 ],
+								[ "PaletteFX: Flow", 48 ],
+								[ "PaletteFX: Ripple", 49 ],
+								[ "PaletteFX: Sparkle", 50 ],
+								[ "PaletteFX: Vortex", 51 ],
+								[ "PaletteFX: Reactive", 52 ],
 								[ "Alphas Mods", 2 ],
 								[ "Vertical Gradient", 3 ],
 								[ "Horizontal Gradient", 4 ],
@@ -83,7 +83,7 @@
 						{
 							"label": "Unlock Max Wireless Brightness",
 							"type": "toggle",
-							"content": ["id_custom_set_value", 0, 8]
+							"content": ["id_custom_wireless_brightness_unlock", 0, 8]
 						},
 						{
 							"showIf": "{id_qmk_rgb_matrix_effect} != 0 && {id_qmk_rgb_matrix_effect} != 255",
@@ -102,7 +102,7 @@
                             "showIf": "{id_qmk_rgb_matrix_effect} >= 46 && {id_qmk_rgb_matrix_effect} <= 51",
                             "label": "Effect Palette",
                             "type": "dropdown",
-                            "content": ["id_custom_set_value", 0, 3],
+                            "content": ["id_custom_palettefx_palette", 0, 3],
                             "options": [
                                 [ "Afterburn", 0 ],
                                 [ "Amber", 1 ],
@@ -154,7 +154,7 @@
 								["10 minutes", 2],
 								["30 minutes", 3]
 							],
-							"content": ["id_custom_set_value", 0, 4]
+							"content": ["id_custom_sleep_timer", 0, 4]
 						}
 					]
 				},
@@ -164,7 +164,7 @@
 						{
 							"label": "SOCD Cleaner",
 							"type": "toggle",
-							"content": ["id_custom_set_value", 0, 6]
+							"content": ["id_custom_socd_cleaner", 0, 6]
 						}
 					]
 				},
@@ -247,7 +247,7 @@
 			],
 
 			[
-				{ "c":"#aaaaaa" },				
+				{ "c":"#aaaaaa" },
                 { "w":1.0,  "h":1.0,  "x":0.0,  "y":0.25 },  "1,0\nl14",
 				{ "w":1.0,  "h":1.0,  "x":0.0 },  "1,1\nl15",
 				{ "w":1.0,  "h":1.0,  "x":0.0 },  "1,2\nl16",
@@ -347,4 +347,3 @@
 		]
 	}
 }
-
